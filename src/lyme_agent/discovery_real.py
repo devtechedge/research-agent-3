@@ -160,7 +160,12 @@ def _clinical_trials_items() -> tuple[list[ResearchItem], list[str]]:
     return items, errors
 
 
-def discover_items() -> DiscoveryResult:
+def discover_items(skip_existing: bool = True) -> DiscoveryResult:
+    """Discover research items from PubMed and ClinicalTrials.gov.
+    
+    Args:
+        skip_existing: If True, filter out items already in the database.
+    """
     result = DiscoveryResult()
     for fetcher in (_pubmed_items, _clinical_trials_items):
         try:
@@ -169,6 +174,8 @@ def discover_items() -> DiscoveryResult:
             result.errors.extend(errors)
         except Exception as exc:
             result.errors.append(str(exc))
+    
+    # Deduplicate by URL/title
     seen: set[str] = set()
     unique: list[ResearchItem] = []
     for item in result.items:
@@ -177,5 +184,18 @@ def discover_items() -> DiscoveryResult:
             continue
         seen.add(key)
         unique.append(item)
+    
+    # Filter out items already in database if persistence is enabled
+    if skip_existing and settings.use_database:
+        try:
+            from .persistence import get_existing_urls
+            sources = list(set(item.source for item in unique))
+            existing_urls = get_existing_urls(sources)
+            unique = [item for item in unique if item.url not in existing_urls]
+            LOG.info(f"Filtered out duplicates, {len(unique)} new items remain")
+        except Exception as exc:
+            LOG.warning(f"Failed to check existing URLs in database: {exc}")
+            result.errors.append(f"Database deduplication failed: {exc}")
+    
     result.items = unique
     return result

@@ -46,7 +46,7 @@ def _build_body(items, errors) -> str:
 
 
 def run_daily_pipeline(output_dir: Path) -> Path:
-    discovery = discover_items()
+    discovery = discover_items(skip_existing=settings.use_database)
     items = discovery.items
     errors = discovery.errors
     date_text = datetime.now().strftime("%Y-%m-%d")
@@ -54,6 +54,28 @@ def run_daily_pipeline(output_dir: Path) -> Path:
     report = build_markdown_report(date_text, body)
     report_path = output_dir / f"daily-report-{date_text}.md"
     write_report(report_path, report)
+    
+    # Save to database if enabled
+    if settings.use_database:
+        try:
+            from .persistence import init_db, save_run, save_research_items
+            
+            # Initialize database schema if needed
+            init_db()
+            
+            # Save run and get run_id
+            run_id = save_run(
+                run_date=date_text,
+                items_count=len(items),
+                errors_count=len(errors),
+                report_path=str(report_path)
+            )
+            
+            # Save research items
+            save_research_items(run_id, items)
+        except Exception as e:
+            errors.append(f"Database persistence failed: {e}")
+    
     subject_prefix = f"{len(items)} new item(s)" if items else "No new items"
     subject = f"Daily research report {date_text} | {subject_prefix}"
     send_email(settings.recipient_email, subject, report)
