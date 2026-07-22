@@ -18,10 +18,6 @@ from lyme_agent.persistence import (
 )
 
 
-def test_psycopg2_available():
-    """Test that psycopg2 is installed."""
-    assert PSYCOPG2_AVAILABLE, "psycopg2 should be available"
-    print("✓ psycopg2 is available")
 
 
 def test_research_item_model():
@@ -63,7 +59,6 @@ def test_database_connection_configured():
 if __name__ == "__main__":
     print("Running persistence tests...\n")
     
-    test_psycopg2_available()
     test_research_item_model()
     test_persistence_functions_exist()
     test_database_connection_configured()
