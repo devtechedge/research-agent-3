@@ -1,0 +1,16 @@
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+dist/
+build/
+*.pyc
+*.pyo
+*.pyd
+.env
+.env.*
+outputs/*.html
+outputs/*.pdf
+outputs/*.json
+outputs/*.md
+!outputs/ARCHITECTURE_PHASE_1.md
