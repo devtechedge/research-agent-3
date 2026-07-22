@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chronic-lyme-research-agent"
+version = "0.1.0"
+description = "Autonomous research agent for chronic Lyme disease / PTLDS"
+requires-python = ">=3.11"
+
+[project.scripts]
+lyme-agent = "lyme_agent.__main__:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
