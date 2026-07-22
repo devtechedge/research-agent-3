@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python Version](https://img.shields.io/badge/python-3.9+-blue.svg)](https://python.org)
-[![GitHub Actions](https://github.com/devtechedge/research-agent-3/workflows/Daily%20Research%20Run/badge.svg)](https://github.com/devtechedge/research-agent-3/actions)
+[![GitHub Actions](https://github.com/devtechedge/research-agent-3/actions/workflows/daily.yml/badge.svg)](https://github.com/devtechedge/research-agent-3/actions)
 [![PostgreSQL](https://img.shields.io/badge/database-PostgreSQL-blue.svg)](https://postgresql.org)
 [![Keep a Changelog](https://img.shields.io/badge/changelog-Keep%20a%20Changelog-blue)](CHANGELOG.md)
 
