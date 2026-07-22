@@ -7,11 +7,19 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 
+from dataclasses import dataclass, field
+
 from .models import ResearchItem
 
 PUBMED_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 CTGOV_BASE = "https://clinicaltrials.gov/api/query/study_fields"
 LOG = logging.getLogger(__name__)
+
+
+@dataclass
+class DiscoveryResult:
+    items: list[ResearchItem] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
 
 def _http_get(url: str) -> str:
@@ -26,10 +34,11 @@ def _http_get(url: str) -> str:
         return response.read().decode("utf-8", errors="replace")
 
 
-def _pubmed_items() -> list[ResearchItem]:
+def _pubmed_items() -> tuple[list[ResearchItem], list[str]]:
     query = '("Lyme Disease"[Title/Abstract] OR PTLDS[Title/Abstract] OR "post-treatment Lyme disease syndrome"[Title/Abstract] OR "Lyme disease treatment"[Title/Abstract] OR Borrelia[Title/Abstract])'
     items: list[ResearchItem] = []
     seen_pmids: set[str] = set()
+    errors: list[str] = []
     search_specs = [
         {"reldate": 30, "retmax": 10},
         {"reldate": 3650, "retmax": 6},
@@ -95,16 +104,18 @@ def _pubmed_items() -> list[ResearchItem]:
                 break
         except Exception as exc:
             LOG.warning("PubMed lookup failed for reldate=%s: %s", spec["reldate"], exc)
-    return items
+            errors.append(f"PubMed reldate={spec['reldate']}: {exc}")
+    return items, errors
 
 
-def _clinical_trials_items() -> list[ResearchItem]:
+def _clinical_trials_items() -> tuple[list[ResearchItem], list[str]]:
     queries = [
         'Lyme OR "post-treatment Lyme disease syndrome" OR PTLDS',
         '"Lyme disease" AND treatment',
     ]
     items: list[ResearchItem] = []
     seen_nct: set[str] = set()
+    errors: list[str] = []
     for expr in queries:
         params = urllib.parse.urlencode(
             {
@@ -145,22 +156,26 @@ def _clinical_trials_items() -> list[ResearchItem]:
                 break
         except Exception as exc:
             LOG.warning("ClinicalTrials.gov lookup failed for expr=%r: %s", expr, exc)
-    return items
+            errors.append(f"ClinicalTrials.gov expr={expr!r}: {exc}")
+    return items, errors
 
 
-def discover_items() -> list[ResearchItem]:
-    items: list[ResearchItem] = []
+def discover_items() -> DiscoveryResult:
+    result = DiscoveryResult()
     for fetcher in (_pubmed_items, _clinical_trials_items):
         try:
-            items.extend(fetcher())
-        except Exception:
-            continue
+            items, errors = fetcher()
+            result.items.extend(items)
+            result.errors.extend(errors)
+        except Exception as exc:
+            result.errors.append(str(exc))
     seen: set[str] = set()
     unique: list[ResearchItem] = []
-    for item in items:
+    for item in result.items:
         key = item.url or item.title.lower()
         if key in seen:
             continue
         seen.add(key)
         unique.append(item)
-    return unique
+    result.items = unique
+    return result

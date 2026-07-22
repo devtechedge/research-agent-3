@@ -7,9 +7,20 @@ from .emailing import send_email
 from .reporting import build_markdown_report, write_report
 
 
-def _build_body(items) -> str:
+def _build_body(items, errors) -> str:
     if not items:
-        return "## Today's discoveries\n\n- No new items discovered."
+        lines = [
+            "## Executive Summary",
+            "- No new items discovered",
+            "",
+            "## Today's discoveries",
+            "- No matching items were returned by PubMed or ClinicalTrials.gov.",
+        ]
+        if errors:
+            lines.extend(["", "## Source warnings"])
+            for err in errors[:8]:
+                lines.append(f"- {err}")
+        return "\n".join(lines)
 
     pubmed = [item for item in items if item.source == "PubMed"]
     trials = [item for item in items if item.source == "ClinicalTrials.gov"]
@@ -35,9 +46,11 @@ def _build_body(items) -> str:
 
 
 def run_daily_pipeline(output_dir: Path) -> Path:
-    items = discover_items()
+    discovery = discover_items()
+    items = discovery.items
+    errors = discovery.errors
     date_text = datetime.now().strftime("%Y-%m-%d")
-    body = _build_body(items)
+    body = _build_body(items, errors)
     report = build_markdown_report(date_text, body)
     report_path = output_dir / f"daily-report-{date_text}.md"
     write_report(report_path, report)
