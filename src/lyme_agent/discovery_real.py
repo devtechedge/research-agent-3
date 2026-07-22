@@ -160,11 +160,12 @@ def _clinical_trials_items() -> tuple[list[ResearchItem], list[str]]:
     return items, errors
 
 
-def discover_items(skip_existing: bool = True) -> DiscoveryResult:
+def discover_items(skip_existing: bool = True, perform_verification: bool = False) -> DiscoveryResult:
     """Discover research items from PubMed and ClinicalTrials.gov.
     
     Args:
         skip_existing: If True, filter out items already in the database.
+        perform_verification: If True, verify citations and score evidence quality.
     """
     result = DiscoveryResult()
     for fetcher in (_pubmed_items, _clinical_trials_items):
@@ -196,6 +197,21 @@ def discover_items(skip_existing: bool = True) -> DiscoveryResult:
         except Exception as exc:
             LOG.warning(f"Failed to check existing URLs in database: {exc}")
             result.errors.append(f"Database deduplication failed: {exc}")
+    
+    # Perform citation verification and evidence scoring if requested
+    if perform_verification and unique:
+        try:
+            from .verification import verify_and_score_items
+            LOG.info("Starting citation verification and evidence scoring...")
+            unique = verify_and_score_items(unique, skip_verification=False)
+            
+            # Log quality summary
+            from .verification import summarize_evidence_quality
+            quality_summary = summarize_evidence_quality(unique)
+            LOG.info(f"Quality assessment complete: {quality_summary}")
+        except Exception as exc:
+            LOG.warning(f"Verification/scoring failed: {exc}")
+            result.errors.append(f"Verification failed: {exc}")
     
     result.items = unique
     return result
