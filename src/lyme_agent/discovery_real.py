@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -10,87 +11,90 @@ from .models import ResearchItem
 
 PUBMED_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 CTGOV_BASE = "https://clinicaltrials.gov/api/query/study_fields"
+LOG = logging.getLogger(__name__)
 
 
 def _http_get(url: str) -> str:
-    with urllib.request.urlopen(url, timeout=20) as response:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "LymeWatch/0.1 (+https://github.com/devtechedge/research-agent-3)",
+            "Accept": "application/json,text/xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
         return response.read().decode("utf-8", errors="replace")
 
 
 def _pubmed_items() -> list[ResearchItem]:
-    today = datetime.now(timezone.utc).date()
-    queries = [
-        (
-            "recent",
-            '("Lyme Disease"[Title/Abstract] OR PTLDS[Title/Abstract] OR '
-            '"post-treatment Lyme disease syndrome"[Title/Abstract] OR '
-            '"Lyme disease treatment"[Title/Abstract] OR Borrelia[Title/Abstract]) '
-            f'AND ("{today - timedelta(days=30)}"[Date - Publication] : "{today}"[Date - Publication])',
-        ),
-        (
-            "latest",
-            '("Lyme Disease"[Title/Abstract] OR PTLDS[Title/Abstract] OR '
-            '"post-treatment Lyme disease syndrome"[Title/Abstract] OR '
-            '"Lyme disease treatment"[Title/Abstract] OR Borrelia[Title/Abstract])',
-        ),
-    ]
+    query = '("Lyme Disease"[Title/Abstract] OR PTLDS[Title/Abstract] OR "post-treatment Lyme disease syndrome"[Title/Abstract] OR "Lyme disease treatment"[Title/Abstract] OR Borrelia[Title/Abstract])'
     items: list[ResearchItem] = []
     seen_pmids: set[str] = set()
-
-    for mode, term in queries:
+    search_specs = [
+        {"reldate": 30, "retmax": 10},
+        {"reldate": 3650, "retmax": 6},
+    ]
+    for spec in search_specs:
         params = urllib.parse.urlencode(
             {
                 "db": "pubmed",
-                "term": term,
-                "retmax": 8 if mode == "recent" else 5,
+                "term": query,
+                "reldate": spec["reldate"],
+                "datetype": "pdat",
                 "sort": "pub date",
+                "retmax": spec["retmax"],
                 "retmode": "xml",
+                "tool": "LymeWatch",
+                "email": "devayanmandal@gmail.com",
             }
         )
-        search_xml = _http_get(f"{PUBMED_BASE}/esearch.fcgi?{params}")
-        root = ET.fromstring(search_xml)
-        ids = [node.text for node in root.findall(".//Id") if node.text]
-        if not ids:
-            continue
-
-        fetch_params = urllib.parse.urlencode(
-            {"db": "pubmed", "id": ",".join(ids), "retmode": "xml"}
-        )
-        fetch_xml = _http_get(f"{PUBMED_BASE}/efetch.fcgi?{fetch_params}")
-        fetch_root = ET.fromstring(fetch_xml)
-        for article in fetch_root.findall(".//PubmedArticle"):
-            title = (article.findtext(".//ArticleTitle") or "Untitled PubMed item").strip()
-            pmid = (article.findtext(".//PMID") or "").strip()
-            if pmid and pmid in seen_pmids:
+        try:
+            search_xml = _http_get(f"{PUBMED_BASE}/esearch.fcgi?{params}")
+            root = ET.fromstring(search_xml)
+            ids = [node.text for node in root.findall(".//Id") if node.text]
+            if not ids:
                 continue
-            if pmid:
-                seen_pmids.add(pmid)
-            abstract_nodes = article.findall(".//Abstract/AbstractText")
-            abstract = " ".join(
-                "".join(node.itertext()).strip()
-                for node in abstract_nodes
-                if "".join(node.itertext()).strip()
+
+            fetch_params = urllib.parse.urlencode(
+                {"db": "pubmed", "id": ",".join(ids), "retmode": "xml", "tool": "LymeWatch"}
             )
-            year = article.findtext(".//PubDate/Year")
-            month = article.findtext(".//PubDate/Month") or "01"
-            day = article.findtext(".//PubDate/Day") or "01"
-            published_at = None
-            if year:
-                try:
-                    published_at = datetime.fromisoformat(f"{year}-{month}-{day}")
-                except ValueError:
-                    published_at = None
-            items.append(
-                ResearchItem(
-                    title=title,
-                    source="PubMed",
-                    url=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid else "https://pubmed.ncbi.nlm.nih.gov/",
-                    published_at=published_at,
-                    summary=abstract[:500] if abstract else None,
+            fetch_xml = _http_get(f"{PUBMED_BASE}/efetch.fcgi?{fetch_params}")
+            fetch_root = ET.fromstring(fetch_xml)
+            for article in fetch_root.findall(".//PubmedArticle"):
+                title = (article.findtext(".//ArticleTitle") or "Untitled PubMed item").strip()
+                pmid = (article.findtext(".//PMID") or "").strip()
+                if pmid and pmid in seen_pmids:
+                    continue
+                if pmid:
+                    seen_pmids.add(pmid)
+                abstract_nodes = article.findall(".//Abstract/AbstractText")
+                abstract = " ".join(
+                    "".join(node.itertext()).strip()
+                    for node in abstract_nodes
+                    if "".join(node.itertext()).strip()
                 )
-            )
-        if items:
-            break
+                year = article.findtext(".//PubDate/Year")
+                month = article.findtext(".//PubDate/Month") or "01"
+                day = article.findtext(".//PubDate/Day") or "01"
+                published_at = None
+                if year:
+                    try:
+                        published_at = datetime.fromisoformat(f"{year}-{month}-{day}")
+                    except ValueError:
+                        published_at = None
+                items.append(
+                    ResearchItem(
+                        title=title,
+                        source="PubMed",
+                        url=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid else "https://pubmed.ncbi.nlm.nih.gov/",
+                        published_at=published_at,
+                        summary=abstract[:500] if abstract else None,
+                    )
+                )
+            if items:
+                break
+        except Exception as exc:
+            LOG.warning("PubMed lookup failed for reldate=%s: %s", spec["reldate"], exc)
     return items
 
 
@@ -111,33 +115,36 @@ def _clinical_trials_items() -> list[ResearchItem]:
                 "fmt": "json",
             }
         )
-        payload = json.loads(_http_get(f"{CTGOV_BASE}?{params}"))
-        for study in payload.get("StudyFieldsResponse", {}).get("StudyFields", []):
-            title = (study.get("BriefTitle", ["Untitled trial"])[0] or "Untitled trial").strip()
-            nct_id = (study.get("NCTId", [""])[0] or "").strip()
-            if nct_id and nct_id in seen_nct:
-                continue
-            if nct_id:
-                seen_nct.add(nct_id)
-            summary = (study.get("BriefSummary", [""])[0] or "").strip()
-            start_date = (study.get("StartDate", [""])[0] or "").strip()
-            published_at = None
-            if start_date:
-                try:
-                    published_at = datetime.fromisoformat(start_date[:10])
-                except ValueError:
-                    published_at = None
-            items.append(
-                ResearchItem(
-                    title=title,
-                    source="ClinicalTrials.gov",
-                    url=f"https://clinicaltrials.gov/study/{nct_id}" if nct_id else "https://clinicaltrials.gov/",
-                    published_at=published_at,
-                    summary=summary[:500] if summary else None,
+        try:
+            payload = json.loads(_http_get(f"{CTGOV_BASE}?{params}"))
+            for study in payload.get("StudyFieldsResponse", {}).get("StudyFields", []):
+                title = (study.get("BriefTitle", ["Untitled trial"])[0] or "Untitled trial").strip()
+                nct_id = (study.get("NCTId", [""])[0] or "").strip()
+                if nct_id and nct_id in seen_nct:
+                    continue
+                if nct_id:
+                    seen_nct.add(nct_id)
+                summary = (study.get("BriefSummary", [""])[0] or "").strip()
+                start_date = (study.get("StartDate", [""])[0] or "").strip()
+                published_at = None
+                if start_date:
+                    try:
+                        published_at = datetime.fromisoformat(start_date[:10])
+                    except ValueError:
+                        published_at = None
+                items.append(
+                    ResearchItem(
+                        title=title,
+                        source="ClinicalTrials.gov",
+                        url=f"https://clinicaltrials.gov/study/{nct_id}" if nct_id else "https://clinicaltrials.gov/",
+                        published_at=published_at,
+                        summary=summary[:500] if summary else None,
+                    )
                 )
-            )
-        if items:
-            break
+            if items:
+                break
+        except Exception as exc:
+            LOG.warning("ClinicalTrials.gov lookup failed for expr=%r: %s", expr, exc)
     return items
 
 
